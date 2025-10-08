@@ -178,7 +178,8 @@ def main(argv= None):
         for communities in itertools.islice(comp_gen, n - 1):
             #starts with 2 components so it is n-1
             result = [set(c) for c in communities]
-
+        for i, nodes in enumerate(result, start=1):
+            print(f"Component {i}: {nodes}")
         # Return the last partition reached
         if args.split_arg_dir:
             #this creates a directory to add the separate components into
