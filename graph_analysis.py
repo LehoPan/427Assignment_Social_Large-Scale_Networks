@@ -195,6 +195,7 @@ def main(argv= None):
         
     if args.components:
         n = args.components
+        #checks to see if the n given is a correct value 
         while True:
             try:
                 n = int(n)
@@ -206,12 +207,15 @@ def main(argv= None):
             except:
                 print("please enter a number for Components n")
                 n = input()
-        
+        #uses networkx girvan_newman to create a generator to split the graph more and more 
         comp_gen = nx.community.girvan_newman(G)
 
         # Iterate until we have n components
         for communities in itertools.islice(comp_gen, n - 1):
+            #starts with 2 components so it is n-1
             result = [set(c) for c in communities]
+        for i, nodes in enumerate(result, start=1):
+            print(f"Component {i}: {nodes}")
         
         output = nx.Graph()
         for nodes in result:
@@ -222,9 +226,11 @@ def main(argv= None):
 
         # Return the last partition reached
         if args.split_arg_dir:
+            #this creates a directory to add the separate components into
             os.makedirs(args.split_arg_dir, exist_ok=True)
 
             for i, nodes in enumerate(result, start=1):
+                #creates a gml files for every component 
                 subgraph = G.subgraph(nodes).copy()
                 filename = os.path.join(args.split_arg_dir, f"component_{i}.gml")
                 nx.write_gml(subgraph, filename)
@@ -283,58 +289,63 @@ def main(argv= None):
             plt.close()
 
     if args.verify_homophily:
-        isHomophily = False
         
+        isHomophily = False
+        #these are variables to see what the difference in edges is 
         same = 0
         different = 0
-
+        #checks every edge and if the colors of the 2 nodes are the same or different
         for u, v in G.edges():
             if 'color' in G.nodes[u] and 'color' in G.nodes[v]:
                 if G.nodes[u]['color'] == G.nodes[v]['color']:
                     same += 1
                 else:
                     different += 1
-
-        # if the graph given has no color assignments to differentiate, skips the homophily test
         if same + different == 0:
             print("No color value in nodes to test for homophily, skipping homophily test.")
         else:
-            observed_ratio = same / (same + different)
-            
-            component_ids = [G.nodes[n]['color'] for n in G.nodes()]
-            random_ratios = []
-            for _ in range(1000):  # 1000 random permutations
-                shuffled = random.sample(component_ids, len(component_ids))
-                shuffled_components = dict(zip(G.nodes(), shuffled))
-                same_r = 0
-                diff_r = 0
-                for u, v in G.edges():
-                    if shuffled_components[u] == shuffled_components[v]:
-                        same_r += 1
-                    else:
-                        diff_r += 1
-                random_ratios.append(same_r / (same_r + diff_r))
-            mean_random = sum(random_ratios) / len(random_ratios)
-            
-            t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
-            if observed_ratio > mean_random and p_value < 0.05:
-                isHomophily = True
-            print("homophily test")
-            print(isHomophily)
+          #gets the observed ratio
+          observed_ratio = same / (same + different)
+          #gets the the colors for every node in order to randomize it  
+          component_ids = [G.nodes[n]['color'] for n in G.nodes()]
+          random_ratios = []
+          #1000 random permutations to check to see if the random chance is equal to the observed
+          for _ in range(1000):  
+              shuffled = random.sample(component_ids, len(component_ids))
+              shuffled_components = dict(zip(G.nodes(), shuffled))
+              #new variable names for the same/different colors
+              same_r = 0
+              diff_r = 0
+              #again checked to see if the color of the nodes on the end of edges are the same
+              for u, v in G.edges():
+                  if shuffled_components[u] == shuffled_components[v]:
+                      same_r += 1
+                  else:
+                      diff_r += 1
+              random_ratios.append(same_r / (same_r + diff_r))
+          mean_random = sum(random_ratios) / len(random_ratios)
+          #does the T-test
+          t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
+          #if the observed ratio is more often connected  
+          if observed_ratio > mean_random and p_value < 0.05:
+              isHomophily = True
+          print("homophily test")
+          print(isHomophily)
 
     if args.verify_balanced_graph:
         balanced = True
         color_map = {} 
-
+        #goes through every node to map it and what the sign should be 
         for node in G.nodes():
             if node not in color_map:
                 color_map[node] = 0
                 q = [node]
-
+                #creates a queue for all the nodes connected to q
                 while q:
                     u = q.pop(0)
                     for v in G.neighbors(u):
                         sign = G[u][v].get('sign', 1)  # default +1 if missing
+                        #adds to color_map and adds the sign
                         if v not in color_map:
                             if sign > 0:
                                 color_map[v] = color_map[u]  # same set
