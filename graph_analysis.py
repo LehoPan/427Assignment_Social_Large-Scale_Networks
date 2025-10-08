@@ -2,7 +2,39 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import argparse
 import random
+import itertools
+import os
+import pandas as pd
+import numpy as np
 from networkx.algorithms import community
+from scipy import stats
+
+# calculates neighborhood ovewrlap for plotting line thickness
+def neighborhood_overlap(G):
+    overlap = {}
+    for u, v in G.edges():
+        neighbors_u = set(G.neighbors(u)) - {v}
+        neighbors_v = set(G.neighbors(v)) - {u}
+        intersection = neighbors_u & neighbors_v
+        union = neighbors_u | neighbors_v
+        if len(union) == 0:
+            overlap[(u, v)] = 0  # avoid division by zero
+        else:
+            overlap[(u, v)] = len(intersection) / len(union)
+    return overlap
+
+# returns the sign of the edge given
+def _edge_sign_value(G: nx.Graph, u, v):
+    """Return sign as +1 or -1. Accept strings like '+' / '-' or numeric."""
+    s = G[u][v].get('sign', None)
+    if s is None:
+        # default to positive if not specified
+        return 1
+    if isinstance(s, (int, float)):
+        return 1 if s >= 0 else -1
+    if isinstance(s, str):
+        return 1 if s.strip() in ('1', '+', 'pos', 'positive') else -1
+    return 1
 
 # reusable function for simualting failures and used in robustness check
 def simulate_failures(G, k):
@@ -66,10 +98,7 @@ def simulate_failures(G, k):
     smallest_cc = min(components, key=len)
 
     return orig_aspl, new_aspl, num_comp, avg_change, len(smallest_cc), len(largest_cc), cluster_persist
-import itertools
-import os
-import random 
-from scipy import stats
+
 
 def main(argv= None):
 
@@ -90,8 +119,15 @@ def main(argv= None):
 
     # load the graph from input .gml
     # graph will be an undirected graph object
-    
     G = nx.read_gml(args.graph_file)
+
+    # graph to modify if the components flag is called and you want to save it to an output
+    output_graph = nx.Graph()
+
+    # variables for creating temporal csv
+    temporal = np.array() # stores our actions for later to convert into csv
+    timestamp = 1 # iterable timestamp tracking each action
+
     # Ensure undirected for many algorithms unless the graph loaded is directed
     if isinstance(G, nx.DiGraph):
         print("Notice: Loaded directed graph, converting to undirected for analysis.")
@@ -180,6 +216,14 @@ def main(argv= None):
             result = [set(c) for c in communities]
         for i, nodes in enumerate(result, start=1):
             print(f"Component {i}: {nodes}")
+        
+        output = nx.Graph()
+        for nodes in result:
+            subgraph = G.subgraph(nodes).copy()
+            output.add_nodes_from(subgraph.nodes(data=True))
+            output.add_edges_from(subgraph.edges(data=True))
+        output_graph = output
+
         # Return the last partition reached
         if args.split_arg_dir:
             #this creates a directory to add the separate components into
@@ -191,10 +235,58 @@ def main(argv= None):
                 filename = os.path.join(args.split_arg_dir, f"component_{i}.gml")
                 nx.write_gml(subgraph, filename)
                 print(f"Exported component {i} → {filename}")
+        
 
     if args.plot:
-        pass
-
+        # input validation, skips if value is not either C, N, or P
+        if args.plot not in ['C', 'N', 'P']:
+            print("Plot flag was not given either one of C, N, or P. Please give a correct input, skipping plotting.")
+        else:
+            plot_mode = args.plot
+            pos = nx.spring_layout(G, seed=42)
+            plt.figure(figsize=(10, 8))
+            if plot_mode == 'C':
+                # node sizes: clustering
+                clustering = nx.clustering(G)
+                deg = dict(G.degree())
+                sizes = [300 + 2000 * clustering.get(n, 0) for n in G.nodes()]
+                colors = [deg.get(n, 0) for n in G.nodes()]
+                nx.draw_networkx_nodes(G, pos, node_size=sizes, node_color=colors, cmap='viridis')
+                nx.draw_networkx_edges(G, pos, alpha=0.6)
+                nx.draw_networkx_labels(G, pos, font_size=8)
+                plt.title("Clustering Coefficient (node size) and Degree (color)")
+            elif plot_mode == 'N':
+                # edge thickness proportional to neighborhood overlap
+                no = neighborhood_overlap(G)
+                # edge colors by sum of degrees
+                edge_widths = [1 + 6 * no.get((u, v), no.get((v, u), 0.0)) for u, v in G.edges()]
+                edge_colors = [G.degree(u) + G.degree(v) for u, v in G.edges()]
+                nx.draw_networkx_nodes(G, pos, node_size=200)
+                nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, edge_cmap=plt.cm.plasma)
+                nx.draw_networkx_labels(G, pos, font_size=8)
+                plt.title("Neighborhood Overlap (edge thickness) and degree-sum (edge color)")
+            elif plot_mode == 'P':
+                # node color attribute 'color' (categorical) and edge sign show as dashed for negative
+                node_colors_attr = nx.get_node_attributes(G, 'color')
+                unique_vals = list(sorted(set(node_colors_attr.values()))) if node_colors_attr else []
+                color_map = {}
+                for i, val in enumerate(unique_vals):
+                    color_map[val] = i
+                node_colors = [color_map.get(node_colors_attr.get(n, None), 0) for n in G.nodes()]
+                # edges: positive solid, negative dashed
+                pos_edges = [(u, v) for u, v in G.edges() if _edge_sign_value(G, u, v) > 0]
+                neg_edges = [(u, v) for u, v in G.edges() if _edge_sign_value(G, u, v) < 0]
+                nx.draw_networkx_nodes(G, pos, node_size=300, node_color=node_colors, cmap='tab10')
+                nx.draw_networkx_edges(G, pos, edgelist=pos_edges)
+                nx.draw_networkx_edges(G, pos, edgelist=neg_edges, style='dashed')
+                nx.draw_networkx_labels(G, pos, font_size=8)
+                plt.title("Attributes plot: node color by 'color', edges dashed if negative sign")
+            else:
+                print(f"Unknown plot mode '{plot_mode}' - no plot generated.")
+                return
+            plt.axis('off')
+            plt.show()
+            plt.close()
 
     if args.verify_homophily:
         
@@ -209,33 +301,36 @@ def main(argv= None):
                     same += 1
                 else:
                     different += 1
-        #gets the observed ratio
-        observed_ratio = same / (same + different)
-        #gets the the colors for every node in order to randomize it  
-        component_ids = [G.nodes[n]['color'] for n in G.nodes()]
-        random_ratios = []
-        #1000 random permutations to check to see if the random chance is equal to the observed
-        for _ in range(1000):  
-            shuffled = random.sample(component_ids, len(component_ids))
-            shuffled_components = dict(zip(G.nodes(), shuffled))
-            #new variable names for the same/different colors
-            same_r = 0
-            diff_r = 0
-            #again checked to see if the color of the nodes on the end of edges are the same
-            for u, v in G.edges():
-                if shuffled_components[u] == shuffled_components[v]:
-                    same_r += 1
-                else:
-                    diff_r += 1
-            random_ratios.append(same_r / (same_r + diff_r))
-        mean_random = sum(random_ratios) / len(random_ratios)
-        #does the T-test
-        t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
-        #if the observed ratio is more often connected  
-        if observed_ratio > mean_random and p_value < 0.05:
-            isHomophily = True
-        print("homophily test")
-        print(isHomophily)
+        if same + different == 0:
+            print("No color value in nodes to test for homophily, skipping homophily test.")
+        else:
+          #gets the observed ratio
+          observed_ratio = same / (same + different)
+          #gets the the colors for every node in order to randomize it  
+          component_ids = [G.nodes[n]['color'] for n in G.nodes()]
+          random_ratios = []
+          #1000 random permutations to check to see if the random chance is equal to the observed
+          for _ in range(1000):  
+              shuffled = random.sample(component_ids, len(component_ids))
+              shuffled_components = dict(zip(G.nodes(), shuffled))
+              #new variable names for the same/different colors
+              same_r = 0
+              diff_r = 0
+              #again checked to see if the color of the nodes on the end of edges are the same
+              for u, v in G.edges():
+                  if shuffled_components[u] == shuffled_components[v]:
+                      same_r += 1
+                  else:
+                      diff_r += 1
+              random_ratios.append(same_r / (same_r + diff_r))
+          mean_random = sum(random_ratios) / len(random_ratios)
+          #does the T-test
+          t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
+          #if the observed ratio is more often connected  
+          if observed_ratio > mean_random and p_value < 0.05:
+              isHomophily = True
+          print("homophily test")
+          print(isHomophily)
 
     if args.verify_balanced_graph:
         balanced = True
@@ -271,6 +366,22 @@ def main(argv= None):
                 break
         print("balance test")
         print(balanced)
+    
+    if args.output:
+        # adds metadata for component id's
+        components = list(nx.connected_components(output_graph))
+        for component_id, comp in enumerate(components):
+            nx.set_node_attributes(output_graph, {n: component_id for n in comp}, name="component_id")
+
+        # all nodes get indicated true or false for isolation
+        isolated_nodes = list(nx.isolates(output_graph))
+        nx.set_node_attributes(output_graph, "False", name="isolated")
+        nx.set_node_attributes(output_graph, {n: "True" for n in isolated_nodes}, name="isolated")
+        nx.write_gml(output_graph, f"{args.output}")
+
+    # # Temporal simulation output to csv
+    # if args.temporal_simulation:
+        
 
 if __name__ == "__main__":
     main()
