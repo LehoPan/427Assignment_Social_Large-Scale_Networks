@@ -37,7 +37,7 @@ def _edge_sign_value(G: nx.Graph, u, v):
 
 # reusable function for simualting failures and used in robustness check
 def simulate_failures(G, k):
-    if k > G.number_of_edges:
+    if k > G.number_of_edges():
         print("There are not enough edges to remove. Please reduce your k value. Exiting program")
         exit()
     Gcopy = G.copy()
@@ -153,7 +153,7 @@ def main(argv= None):
         print(f'original avg shortest path: {results[0]}')
         print(f'new avg shortest_path: {results[1]}')
         print(f'change in avg shortest path: {None if (results[0] is None or results[1] is None) else (results[1] - results[0])}')
-        print(f'number of disconnected components: {results[2]}')
+        print(f'number of components: {results[2]}')
         print(f'avg change in betweenness of nodes: {results[3]}')
     
     # robustness_check flag checked
@@ -167,7 +167,7 @@ def main(argv= None):
             print('Please give a valid integer as the k value for robustness_check. Exiting program.')
             exit()
         # checks to see if there are enough edges to remove in the graph
-        if k > G.number_of_edges:
+        if k > G.number_of_edges():
             print("There are not enough edges to remove. Please reduce your k value. Exiting program")
             exit()
         # runs the simulation failure 100 times
@@ -216,7 +216,7 @@ def main(argv= None):
             exit()
 
         #checks to see if the amount of components is greater than the amount of nodes
-        if n > G.number_of_nodes:
+        if n > G.number_of_nodes():
             print("There are not enough nodes to give you the components you want. Please reduce your n value. Exiting program")
             exit()
         #uses networkx girvan_newman to create a generator to split the graph more and more 
@@ -341,8 +341,11 @@ def main(argv= None):
             #if the observed ratio is more often connected  
             if observed_ratio > mean_random and p_value < 0.05:
                 isHomophily = True
-            print("homophily test")
-            print(isHomophily)
+            print("--- Testing Homophily ---")
+            if isHomophily:
+                print("There is homophily.")
+            else:
+                print("There is no homophily.")
 
     if args.verify_balanced_graph:
         balanced = True
@@ -376,8 +379,11 @@ def main(argv= None):
                         break
             if not balanced:
                 break
-        print("balance test")
-        print(balanced)
+        print("--- Testing Balance of Graph ---")
+        if balanced:
+            print("There is balance.")
+        else:
+            print("There is not balance.")
     
     if args.output:
         #checks to see if the filetype is correct

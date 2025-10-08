@@ -1,0 +1,7 @@
+source,target,timestamp,action
+A,B,1,add
+A,D,2,add
+A,E,3,add
+B,C,4,add
+B,E,5,add
+C,D,6,add

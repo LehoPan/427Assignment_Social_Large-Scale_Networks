@@ -12,6 +12,7 @@ For this project we implemented following functions/arguments:
     - Side note that if the robustness_check or simulate_failures flag is set they will both run before components.
 - `--split_output_dir`
     - Used enumerate to create subgraphs and write each component to their own .gml file.
+    - This flag does nothing if `--components` is not flagged
 - `--plot`
     - Validates input is one of "C", "P", or "N". If not it will skip the plotting.
     - Uses `matplotlib` to plot each node and edge in the graph. Computes the clustering with `nx.clustering()`, and neighborhood overlap with a custom function instead of `networkx`.
