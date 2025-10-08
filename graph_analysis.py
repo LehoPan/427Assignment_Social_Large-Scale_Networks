@@ -4,10 +4,9 @@ import argparse
 import random
 import itertools
 import os
-import pandas as pd
-import numpy as np
 from networkx.algorithms import community
 from scipy import stats
+import csv
 
 # calculates neighborhood ovewrlap for plotting line thickness
 def neighborhood_overlap(G):
@@ -38,6 +37,9 @@ def _edge_sign_value(G: nx.Graph, u, v):
 
 # reusable function for simualting failures and used in robustness check
 def simulate_failures(G, k):
+    if k > G.number_of_edges:
+        print("There are not enough edges to remove. Please reduce your k value. Exiting program")
+        exit()
     Gcopy = G.copy()
     edges = list(Gcopy.edges())
 
@@ -117,16 +119,21 @@ def main(argv= None):
     p.add_argument("--split_arg_dir", help="Splitting the gml files by component")
     args = p.parse_args(argv)
 
+    # checks to see if the graph is a correct filetype and it exists
+    if not args.graph_file.lower().endswith(".gml"):
+        print(f"Error: Input file '{args.graph_file}' is not a .gml file.")
+        exit()
+
+    if not os.path.isfile(args.graph_file):
+        print(f"Error: Input file '{args.graph_file}' does not exist.")
+        exit()
     # load the graph from input .gml
     # graph will be an undirected graph object
     G = nx.read_gml(args.graph_file)
 
     # graph to modify if the components flag is called and you want to save it to an output
-    output_graph = nx.Graph()
+    output_graph = G
 
-    # variables for creating temporal csv
-    temporal = np.array() # stores our actions for later to convert into csv
-    timestamp = 1 # iterable timestamp tracking each action
 
     # Ensure undirected for many algorithms unless the graph loaded is directed
     if isinstance(G, nx.DiGraph):
@@ -159,7 +166,10 @@ def main(argv= None):
         except:
             print('Please give a valid integer as the k value for robustness_check. Exiting program.')
             exit()
-        
+        # checks to see if there are enough edges to remove in the graph
+        if k > G.number_of_edges:
+            print("There are not enough edges to remove. Please reduce your k value. Exiting program")
+            exit()
         # runs the simulation failure 100 times
         connected_components = 0
         min_component_size = None
@@ -196,17 +206,19 @@ def main(argv= None):
     if args.components:
         n = args.components
         #checks to see if the n given is a correct value 
-        while True:
-            try:
-                n = int(n)
-                if n<= 0:
-                    print("Components n must be greater than 0, please input your new value")
-                    n = input()
-                else:
-                    break
-            except:
-                print("please enter a number for Components n")
-                n = input()
+        try:
+            n = int(n)
+            if n<= 0:
+                print("Components n must be greater than 0, please input your new value. Exiting program")
+                exit()
+        except:
+            print("Please enter a number for Components n. Exiting program")
+            exit()
+
+        #checks to see if the amount of components is greater than the amount of nodes
+        if n > G.number_of_nodes:
+            print("There are not enough nodes to give you the components you want. Please reduce your n value. Exiting program")
+            exit()
         #uses networkx girvan_newman to create a generator to split the graph more and more 
         comp_gen = nx.community.girvan_newman(G)
 
@@ -304,33 +316,33 @@ def main(argv= None):
         if same + different == 0:
             print("No color value in nodes to test for homophily, skipping homophily test.")
         else:
-          #gets the observed ratio
-          observed_ratio = same / (same + different)
-          #gets the the colors for every node in order to randomize it  
-          component_ids = [G.nodes[n]['color'] for n in G.nodes()]
-          random_ratios = []
-          #1000 random permutations to check to see if the random chance is equal to the observed
-          for _ in range(1000):  
-              shuffled = random.sample(component_ids, len(component_ids))
-              shuffled_components = dict(zip(G.nodes(), shuffled))
-              #new variable names for the same/different colors
-              same_r = 0
-              diff_r = 0
-              #again checked to see if the color of the nodes on the end of edges are the same
-              for u, v in G.edges():
-                  if shuffled_components[u] == shuffled_components[v]:
-                      same_r += 1
-                  else:
-                      diff_r += 1
-              random_ratios.append(same_r / (same_r + diff_r))
-          mean_random = sum(random_ratios) / len(random_ratios)
-          #does the T-test
-          t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
-          #if the observed ratio is more often connected  
-          if observed_ratio > mean_random and p_value < 0.05:
-              isHomophily = True
-          print("homophily test")
-          print(isHomophily)
+        #gets the observed ratio
+            observed_ratio = same / (same + different)
+            #gets the the colors for every node in order to randomize it  
+            component_ids = [G.nodes[n]['color'] for n in G.nodes()]
+            random_ratios = []
+            #1000 random permutations to check to see if the random chance is equal to the observed
+            for _ in range(1000):  
+                shuffled = random.sample(component_ids, len(component_ids))
+                shuffled_components = dict(zip(G.nodes(), shuffled))
+                #new variable names for the same/different colors
+                same_r = 0
+                diff_r = 0
+                #again checked to see if the color of the nodes on the end of edges are the same
+                for u, v in G.edges():
+                    if shuffled_components[u] == shuffled_components[v]:
+                        same_r += 1
+                    else:
+                        diff_r += 1
+                random_ratios.append(same_r / (same_r + diff_r))
+            mean_random = sum(random_ratios) / len(random_ratios)
+            #does the T-test
+            t_stat, p_value = stats.ttest_1samp(random_ratios, observed_ratio)
+            #if the observed ratio is more often connected  
+            if observed_ratio > mean_random and p_value < 0.05:
+                isHomophily = True
+            print("homophily test")
+            print(isHomophily)
 
     if args.verify_balanced_graph:
         balanced = True
@@ -368,6 +380,10 @@ def main(argv= None):
         print(balanced)
     
     if args.output:
+        #checks to see if the filetype is correct
+        if not args.output.lower().endswith(".gml"):
+            print(f"Error: Output file '{args.output}' must have a .gml extension.")
+            exit()
         # adds metadata for component id's
         components = list(nx.connected_components(output_graph))
         for component_id, comp in enumerate(components):
@@ -379,8 +395,26 @@ def main(argv= None):
         nx.set_node_attributes(output_graph, {n: "True" for n in isolated_nodes}, name="isolated")
         nx.write_gml(output_graph, f"{args.output}")
 
-    # # Temporal simulation output to csv
-    # if args.temporal_simulation:
+    # Temporal simulation output to csv
+    if args.temporal_simulation:
+        #checks to see if the file exists 
+        if not args.temporal_simulation.lower().endswith(".csv"):
+            print(f"Error: Temporal simulation file '{args.temporal_simulation}' must have a .csv extension.")
+            exit()
+        #gets the filname
+        fileName = args.temporal_simulation
+        #creates a list of edges in the graph
+        edges = [(u, v) for u, v in G.edges()]
+        timestamp = 1
+        #opens the file and writes every edge into the graph 
+        with open(fileName, "w", newline="") as f:
+            writer = csv.writer(f)
+            # header
+            writer.writerow(["source", "target", "timestamp", "action"])  
+            # write edges
+            for u, v in edges:
+                writer.writerow([u, v, timestamp, "add"])
+                timestamp+=1
         
 
 if __name__ == "__main__":
